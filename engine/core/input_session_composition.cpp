@@ -886,6 +886,22 @@ InputSession::SelectionTransition InputSession::advance_composition_after_select
     if (is_japanese())
     {
         transition.full_pure_pinyin = request().raw_input;
+        const std::string typed = request().raw_input_with_cases;
+        const size_t consumed = selected_pinyin.size();
+        transition.continues_composition =
+            consumed > 0 && consumed < typed.size() && typed.compare(0, consumed, selected_pinyin) == 0;
+        transition.consumed_raw_input_with_cases =
+            typed.substr(0, transition.continues_composition ? consumed : typed.size());
+        if (transition.continues_composition)
+        {
+            engine_.replace_japanese_raw_input(request().raw_input.substr(consumed), typed.substr(consumed));
+            online_requests_.invalidate();
+            if (local_input_mode_ == LocalInputMode::TemporaryJapanese)
+            {
+                local_preedit_ = "R" + engine_.get_preedit();
+                local_candidates_ = engine_.get_candidates();
+            }
+        }
         transition.current_segmentation = request().segmentation;
         transition.current_segmentation_with_cases = request().raw_input_with_cases;
         return transition;

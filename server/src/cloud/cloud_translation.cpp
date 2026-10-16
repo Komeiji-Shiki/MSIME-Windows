@@ -20,7 +20,6 @@ namespace
 {
 // Wait until the candidate window has been idle for 500ms before a TMT request.
 constexpr auto kIdleDelay = std::chrono::milliseconds(500);
-constexpr auto kNegativeTtl = std::chrono::minutes(8);
 constexpr size_t kMaxSourceChars = 40;
 constexpr size_t kMaxCacheEntries = 4096;
 
@@ -36,7 +35,6 @@ std::string g_db_path;
 CloudTranslation::ApplyCallback g_callback;
 
 std::unordered_map<std::string, std::string> g_cache;
-std::unordered_map<std::string, std::chrono::steady_clock::time_point> g_negative;
 
 std::string TargetLanguage(const TranslationConfig &config)
 {
@@ -98,28 +96,6 @@ void RememberPositive(const std::string &identity, std::string gloss)
     if (g_cache.size() >= kMaxCacheEntries)
         g_cache.clear();
     g_cache[identity] = std::move(gloss);
-    g_negative.erase(identity);
-}
-
-bool IsNegative(const std::string &identity)
-{
-    const auto found = g_negative.find(identity);
-    if (found == g_negative.end())
-        return false;
-    if (found->second <= std::chrono::steady_clock::now())
-    {
-        g_negative.erase(found);
-        return false;
-    }
-    return true;
-}
-
-void RememberNegative(const std::string &identity)
-{
-    std::lock_guard lock(g_mutex);
-    if (g_negative.size() >= kMaxCacheEntries)
-        g_negative.clear();
-    g_negative[identity] = std::chrono::steady_clock::now() + kNegativeTtl;
 }
 
 TencentTmt::Credentials ResolveCredentials(const TencentTmtConfig &config)
@@ -203,9 +179,10 @@ void ApplyTranslatedGroup(const std::vector<EnglishIme::TranslationQuery> &group
         const std::string identity = Identity(group[i], target_language, provider_scope);
         const std::string raw = i < translated.size() ? translated[i] : std::string{};
         const std::string gloss = CloudTranslation::FormatGloss(raw);
+        // 空结果也可能是超时、限流或批次预算耗尽后尚未发送的请求，不能当作没有译文缓存。
+        // 保留成功结果；失败项在下一次候选请求时重试，仍沿用现有的空闲延时和批次预算。
         if (gloss.empty())
         {
-            RememberNegative(identity);
             continue;
         }
         RememberPositive(identity, gloss);
@@ -301,8 +278,6 @@ void WorkerLoop()
                     results.push_back({query.key, query.direction, cached->second});
                     continue;
                 }
-                if (IsNegative(identity))
-                    continue;
                 if (query.direction == EnglishIme::TranslationDirection::EnglishToChinese &&
                     CloudTranslation::IsCloudTranslatableEnglish(query.key))
                     en_zh.push_back(query);

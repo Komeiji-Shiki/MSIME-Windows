@@ -195,8 +195,9 @@ std::vector<WordItem> JapaneseCandidateProvider::query(const QueryRequest &reque
 
     if (!conversion.hiragana.empty() && !kana_first)
     {
+        // 和整句候选用同一份按键边界，hiragana 非空时 segments 一定有末段。
         const std::string converted_input =
-            request.raw_input_with_cases.substr(0, request.raw_input.size() - conversion.pending.size());
+            request.raw_input_with_cases.substr(0, conversion.segments.back().input_end);
         AppendUnique(candidates, seen, converted_input, conversion.hiragana, 1000000, CandidateSource::Generated);
         AppendUnique(candidates, seen, converted_input, japanese::HiraganaToKatakana(conversion.hiragana), 999999,
                      CandidateSource::Generated);

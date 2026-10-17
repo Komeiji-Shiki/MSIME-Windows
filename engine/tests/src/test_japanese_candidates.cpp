@@ -195,6 +195,17 @@ void run_test(const std::filesystem::path &root)
     check_selection("kka", "ッ", "ka");
     check_selection("kaw", "か", "w");
     check_selection("kaw", "カ", "w");
+    check_selection("ka'ta", "か", "ta");
+
+    // 固定候选位打开时 candidates() 走混排列表，分段选词后要按剩余输入重建。
+    metasequoia::InputSession pinned(SchemeType::JapaneseRomaji, 0, true, true, false, paths);
+    pinned.enable_fixed_positions();
+    type(pinned, "kawai");
+    require(pinned.select_candidate("川").commit == "川" && pinned.preedit() == "i",
+            "Pinned selection lost the suffix.");
+    require(!pinned.candidates().empty() && std::all_of(pinned.candidates().begin(), pinned.candidates().end(),
+                                                        [](const WordItem &item) { return item.pinyin == "i"; }),
+            "Pinned candidates still belonged to the input before the selection.");
 
     // Windows 分段选词直接调用 transition；公开会话接口还要正确结束整词和补全候选。
     metasequoia::InputSession segmented(SchemeType::JapaneseRomaji, 0, true, true, false, paths);

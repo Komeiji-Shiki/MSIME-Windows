@@ -28,11 +28,11 @@ namespace FanyNamedPipe
 void ApplyCloudCandidate(const std::string &candidate, const std::string &pinyin, uint64_t generation,
                          const std::optional<metasequoia::OnlineQuery> &query)
 {
-    if (!GetConfiguredCloudCandidatesEnabled() || Global::candidate_ui.selection_started)
+    if (!GetConfiguredCloudCandidatesEnabled())
         return;
     // A callback can become stale after enqueueing, while earlier key tasks run.
     // 译文页占用着同一份 items，异步候选必须等它退出再合并，否则会把译文冲掉。
-    if (FindCloudRequestOrigin(pinyin, generation).client_id == 0 || !g_inputSession || IsCandidateSubPageActive())
+    if (FindCloudRequestOrigin(pinyin, generation).client_id == 0 || !g_inputSession || !CanMergeAsyncCandidates())
         return;
 
     if (candidate.empty())
@@ -97,7 +97,7 @@ void ApplyCloudCandidate(const std::string &candidate, const std::string &pinyin
 // 序有没有真的变：没变就一个字节都不动 UI。这既挡掉了过期结果，也挡掉了模型弃权的情况。
 void ApplyRescoredOrder()
 {
-    if (!g_inputSession || IsCandidateSubPageActive() || Global::candidate_ui.selection_started)
+    if (!g_inputSession || !CanMergeAsyncCandidates())
         return;
     // 造词界面和译文页各自占着 items，重排不该去动它们。
     if (GlobalIme::composition.creating_word.active)
@@ -152,8 +152,7 @@ void ApplyAiCandidate(const std::string &candidate, const std::string &identity,
     const bool helpcode_active = has_session && g_inputSession->has_active_helpcode();
     const std::string current_identity = has_session ? g_inputSession->get_pinyin_segmentation() : std::string{};
     if (!enabled || candidate.empty() || !has_session || non_pinyin || !complete || helpcode_active ||
-        GlobalIme::composition.creating_word.active || current_identity != identity || IsCandidateSubPageActive() ||
-        Global::candidate_ui.selection_started)
+        GlobalIme::composition.creating_word.active || current_identity != identity || !CanMergeAsyncCandidates())
     {
         (void)0;
         return;
@@ -206,11 +205,10 @@ void ApplyEnglishCandidates(std::vector<WordItem> candidates, const std::string 
     {
         return;
     }
-    if (Global::candidate_ui.selection_started)
-    {
-        g_dedicated_english_answer_pending = false;
+    // 等着这次答复时候选窗还没显示，用户只是在看不见的原文占位上按了方向键，不算开始选词：
+    // 照常换上英文候选，答复同时放行被扣下的显示。
+    if (Global::candidate_ui.selection_started && !g_dedicated_english_answer_pending)
         return;
-    }
 
     auto &items = Global::candidate_ui.items;
     std::string context_input = input;
@@ -245,6 +243,7 @@ void ApplyEnglishCandidates(std::vector<WordItem> candidates, const std::string 
     Global::candidate_ui.item_total_count = static_cast<int>(items.size());
     Global::candidate_ui.page_index = 0;
     Global::candidate_ui.select_first_on_page();
+    Global::candidate_ui.selection_started = false;
     Global::candidate_ui.clear_page();
     g_dedicated_english_answer_pending = false;
     RefreshCandidatePageUi(true);
@@ -346,11 +345,10 @@ void InsertFirstAndAppendRest(std::vector<WordItem> &items, std::vector<WordItem
 void ApplyMixedCandidates(MixedCandidates::Result result, const std::string &input, uint64_t generation)
 {
     if (!GetConfiguredMixedCandidatesEnabled() || !MixedCandidates::IsCurrent(input, generation) ||
-        g_inputSession == nullptr || g_english_input_mode || IsCandidateSubPageActive() ||
+        g_inputSession == nullptr || g_english_input_mode || !CanMergeAsyncCandidates() ||
         (g_inputSession->current_scheme_type() != SchemeType::Quanpin &&
          g_inputSession->current_scheme_type() != SchemeType::Shuangpin) ||
-        g_inputSession->get_pinyin_sequence_with_cases() != input || GlobalIme::composition.creating_word.active ||
-        Global::candidate_ui.selection_started)
+        g_inputSession->get_pinyin_sequence_with_cases() != input || GlobalIme::composition.creating_word.active)
     {
         return;
     }

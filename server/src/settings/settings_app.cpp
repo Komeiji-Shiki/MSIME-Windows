@@ -1808,6 +1808,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT message, WPARAM w_param, LPARAM l_pa
     case kScanSkinCatalog:
         PostConfig(true);
         return 0;
+    case WM_SETTINGCHANGE:
+        if (l_param && lstrcmpiW(reinterpret_cast<LPCWSTR>(l_param), L"ImmersiveColorSet") == 0)
+        {
+            // 系统主题变化不会修改 config.toml，必须主动重算主题并在 UI 线程应用。
+            PostConfig();
+        }
+        break;
     case WM_NCCALCSIZE:
         if (w_param)
         {

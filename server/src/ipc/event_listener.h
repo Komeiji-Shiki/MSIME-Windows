@@ -61,6 +61,8 @@ void EnqueueCandidateTranslations(std::vector<EnglishIme::TranslationResult> res
                                   bool merge = false);
 void EnqueueMixedCandidates(MixedCandidates::Result result, const std::string &input, uint64_t generation);
 void EnqueueCandidateUiAction(CandidateUiAction action, int one_based_index, int fixed_position = 0);
+// 鼠标开始操作当前显示的候选页时，通知工作线程保持这批候选的顺序。
+void EnqueueCandidateUiInteraction(uint64_t page_generation);
 // Paging carries a step count rather than a candidate index. Steps coalesce
 // into a page task already queued for the same client, so spinning the wheel
 // cannot outrun the worker with a long run of engine-backed page moves.

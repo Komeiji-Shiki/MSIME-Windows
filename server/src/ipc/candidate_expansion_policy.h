@@ -4,6 +4,7 @@
 #include "ipc/candidate_selection_policy.h"
 
 #include <algorithm>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -15,6 +16,19 @@ namespace FanyImeIpc
 inline void SetExpandedCandidatesKeepingPagePosition(Global::CandidateUiState &ui, std::vector<WordItem> expanded,
                                                      const EnglishPlacement &english_placement = {})
 {
+    if (ui.selection_started)
+    {
+        // 翻页扩展只追加尚未显示的词。引擎可能已经有新的重排结果，不能挪动用户正在选的项。
+        std::unordered_set<std::string> seen;
+        for (const auto &candidate : ui.items)
+            seen.insert(candidate.word);
+        for (auto &candidate : expanded)
+            if (seen.insert(candidate.word).second)
+                ui.items.push_back(std::move(candidate));
+        ui.item_total_count = static_cast<int>(ui.items.size());
+        ui.clear_page();
+        return;
+    }
     for (const auto &candidate : ui.items)
     {
         switch (candidate.source)

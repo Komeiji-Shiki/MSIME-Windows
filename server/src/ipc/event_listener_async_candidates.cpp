@@ -28,7 +28,7 @@ namespace FanyNamedPipe
 void ApplyCloudCandidate(const std::string &candidate, const std::string &pinyin, uint64_t generation,
                          const std::optional<metasequoia::OnlineQuery> &query)
 {
-    if (!GetConfiguredCloudCandidatesEnabled())
+    if (!GetConfiguredCloudCandidatesEnabled() || Global::candidate_ui.selection_started)
         return;
     // A callback can become stale after enqueueing, while earlier key tasks run.
     // 译文页占用着同一份 items，异步候选必须等它退出再合并，否则会把译文冲掉。
@@ -97,7 +97,7 @@ void ApplyCloudCandidate(const std::string &candidate, const std::string &pinyin
 // 序有没有真的变：没变就一个字节都不动 UI。这既挡掉了过期结果，也挡掉了模型弃权的情况。
 void ApplyRescoredOrder()
 {
-    if (!g_inputSession || IsCandidateSubPageActive())
+    if (!g_inputSession || IsCandidateSubPageActive() || Global::candidate_ui.selection_started)
         return;
     // 造词界面和译文页各自占着 items，重排不该去动它们。
     if (GlobalIme::composition.creating_word.active)
@@ -152,7 +152,8 @@ void ApplyAiCandidate(const std::string &candidate, const std::string &identity,
     const bool helpcode_active = has_session && g_inputSession->has_active_helpcode();
     const std::string current_identity = has_session ? g_inputSession->get_pinyin_segmentation() : std::string{};
     if (!enabled || candidate.empty() || !has_session || non_pinyin || !complete || helpcode_active ||
-        GlobalIme::composition.creating_word.active || current_identity != identity || IsCandidateSubPageActive())
+        GlobalIme::composition.creating_word.active || current_identity != identity || IsCandidateSubPageActive() ||
+        Global::candidate_ui.selection_started)
     {
         (void)0;
         return;
@@ -203,6 +204,11 @@ void ApplyEnglishCandidates(std::vector<WordItem> candidates, const std::string 
     if (!dedicated_mode || !EnglishIme::IsCurrent(input, generation, dedicated_mode) || g_inputSession == nullptr ||
         expected_input != input || GlobalIme::composition.creating_word.active || IsCandidateSubPageActive())
     {
+        return;
+    }
+    if (Global::candidate_ui.selection_started)
+    {
+        g_dedicated_english_answer_pending = false;
         return;
     }
 
@@ -343,7 +349,8 @@ void ApplyMixedCandidates(MixedCandidates::Result result, const std::string &inp
         g_inputSession == nullptr || g_english_input_mode || IsCandidateSubPageActive() ||
         (g_inputSession->current_scheme_type() != SchemeType::Quanpin &&
          g_inputSession->current_scheme_type() != SchemeType::Shuangpin) ||
-        g_inputSession->get_pinyin_sequence_with_cases() != input || GlobalIme::composition.creating_word.active)
+        g_inputSession->get_pinyin_sequence_with_cases() != input || GlobalIme::composition.creating_word.active ||
+        Global::candidate_ui.selection_started)
     {
         return;
     }

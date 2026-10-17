@@ -566,6 +566,7 @@ bool ExpandCandidatesKeepingPagePosition()
 PageMoveResult MoveCandidatePage(int offset)
 {
     auto &ui = Global::candidate_ui;
+    ui.begin_selection();
     if (offset > 0 && ui.is_next_page_partial_last_page())
     {
         // Populate the last partial page before entering it, so the first

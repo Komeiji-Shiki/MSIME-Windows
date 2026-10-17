@@ -146,3 +146,33 @@ TEST_CASE(candidate_expansion_rebuilds_local_candidates_without_carrying_stale_f
     for (size_t index = 0; index < expanded.size(); ++index)
         REQUIRE_EQ(ui.items[index].word, expanded[index].word);
 }
+
+TEST_CASE(candidate_expansion_keeps_every_visible_position_after_selection_started)
+{
+    Global::CandidateUiState ui;
+    ui.page_size = 3;
+    auto initial = LocalCandidates(5);
+    initial.insert(initial.begin() + 1, WordItem("ni", "cloud", 0, CandidateSource::CloudSuggestion));
+    ui.set_items(initial);
+    ui.page_index = 1;
+    ui.selected_index_in_page = 1;
+    ui.begin_selection();
+
+    // 新的引擎结果顺序已经变化，且带有重复的云候选；扩展只能在原列表后追加新词。
+    auto expanded = LocalCandidates(10);
+    std::reverse(expanded.begin(), expanded.end());
+    expanded.push_back(initial[1]);
+    FanyImeIpc::SetExpandedCandidatesKeepingPagePosition(ui, std::move(expanded));
+    REQUIRE(ui.selection_started);
+    REQUIRE_EQ(ui.page_index, 1);
+    REQUIRE_EQ(ui.selected_index_in_page, 1);
+    REQUIRE_EQ(ui.item_total_count, 11);
+    for (size_t index = 0; index < initial.size(); ++index)
+    {
+        REQUIRE_EQ(ui.items[index].word, initial[index].word);
+        REQUIRE(ui.items[index].source == initial[index].source);
+    }
+    REQUIRE_EQ(ui.items[6].word, std::string("local-9"));
+    REQUIRE_EQ(ui.items.back().word, std::string("local-5"));
+    REQUIRE(ui.has_next_page());
+}

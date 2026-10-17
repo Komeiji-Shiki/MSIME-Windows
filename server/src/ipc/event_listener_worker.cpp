@@ -153,6 +153,7 @@ struct Task
     bool session_pinyin_is_canonical = false;
     std::shared_ptr<IInputSession> phrase_session;
     int candidate_one_based_index = 0;
+    uint64_t candidate_page_generation = 0;
     int fixed_position = 0;
     int page_steps = 0;
     bool toolbar_from_ime_enabled = false;
@@ -249,7 +250,7 @@ void WorkerThread()
             task.type == TaskType::UiCommitCandidate || task.type == TaskType::UiPinCandidate ||
             task.type == TaskType::UiDeleteCandidate || task.type == TaskType::UiFixCandidatePosition ||
             task.type == TaskType::UiClearCandidatePosition || task.type == TaskType::UiPageUp ||
-            task.type == TaskType::UiPageDown;
+            task.type == TaskType::UiPageDown || task.type == TaskType::UiBeginCandidateSelection;
         if (candidateUiAction && !CandidateUiOwnerIsCurrent({task.client_id, task.activation_epoch}))
         {
             // The page was hidden or replaced after the click was posted.
@@ -598,6 +599,12 @@ void WorkerThread()
             HandleToolbarLanguageToggle(task.toolbar_from_ime_enabled);
             break;
         }
+
+        case TaskType::UiBeginCandidateSelection:
+            // 旧页面的鼠标任务不能冻结用户刚开始输入的新一批候选。
+            if (task.candidate_page_generation == Global::LoadCandidatePageSnapshot()->generation)
+                Global::candidate_ui.begin_selection();
+            break;
 
         case TaskType::UiCommitCandidate: {
             ProcessSelectionKey(0, task.client_id, task.activation_epoch, task.candidate_one_based_index - 1);
@@ -1125,6 +1132,25 @@ void EnqueuePipeSessionInvalidatedTask(uint64_t client_id, uint64_t invalidation
     disconnectData.event_type = FanyImePipeEventType::ClientSuspended;
     disconnectData.client_id = client_id;
     EnqueueTask(TaskType::ClientSuspended, disconnectData, invalidation_epoch);
+}
+
+void EnqueueCandidateUiInteraction(uint64_t page_generation)
+{
+    if (!pipe_running || page_generation == 0)
+        return;
+    const FanyImeIpc::CandidateUiOwner owner = SnapshotCandidateUiOwner();
+    if (!owner)
+        return;
+    {
+        std::lock_guard lock(queueMutex);
+        Task task;
+        task.type = TaskType::UiBeginCandidateSelection;
+        task.client_id = owner.client_id;
+        task.activation_epoch = owner.activation_epoch;
+        task.candidate_page_generation = page_generation;
+        taskQueue.push(std::move(task));
+    }
+    pipe_queueCv.notify_one();
 }
 
 void EnqueueCandidateUiAction(CandidateUiAction action, int one_based_index, int fixed_position)

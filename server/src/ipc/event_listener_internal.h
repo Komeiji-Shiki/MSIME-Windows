@@ -153,6 +153,7 @@ enum class TaskType
     ClientSuspended,
     StatusSnapshot,
     UiCommitCandidate,
+    UiBeginCandidateSelection,
     UiPinCandidate,
     UiDeleteCandidate,
     UiFixCandidatePosition,

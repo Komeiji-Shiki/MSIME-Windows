@@ -5,6 +5,7 @@
 #include "defines/globals.h"
 #include "global/globals.h"
 #include "ipc/candidate_translation_policy.h"
+#include "ipc/event_listener.h"
 #include "ipc/ipc.h"
 #include "log/candidate_diag_log.h"
 #include "skin/candidate_skin_catalog.h"
@@ -1251,6 +1252,7 @@ void CandidatePresenter::ShowItemContextMenu(size_t pageIndex, POINT clientPoint
 
     // A mouse callback has no posted-message handoff at all, so it must not walk the worker's live page either.
     const Global::CandidatePageSnapshotPtr page = Global::LoadCandidatePageSnapshot();
+    FanyNamedPipe::EnqueueCandidateUiInteraction(page->generation);
     std::wstring word;
     if (pageIndex < page->page_words.size())
     {
@@ -1918,7 +1920,12 @@ void CandidatePresenter::ArmHoverIfPointerMoved()
     {
         return;
     }
-    hoverArmed_ = true;
+    if (!hoverArmed_)
+    {
+        FanyNamedPipe::EnqueueCandidateUiInteraction(
+            Global::rendered_candidate_page_generation.load(std::memory_order_acquire));
+        hoverArmed_ = true;
+    }
     if (impl_ && impl_->list)
     {
         impl_->list->SetHoverEnabled(true);

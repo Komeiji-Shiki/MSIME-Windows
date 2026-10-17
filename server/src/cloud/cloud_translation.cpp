@@ -36,6 +36,15 @@ CloudTranslation::ApplyCallback g_callback;
 
 std::unordered_map<std::string, std::string> g_cache;
 
+// 提供方对超时、限流、凭据错误和「没有译文」都只回空串，分不清哪次值得马上重试，所以失败项
+// 按次数退避：网络恢复后很快能补上，持续失败的词也不会每次刷新候选都被重发、挤占批次预算。
+struct FailureBackoff
+{
+    unsigned failures = 0;
+    std::chrono::steady_clock::time_point retry_at;
+};
+std::unordered_map<std::string, FailureBackoff> g_failures;
+
 std::string TargetLanguage(const TranslationConfig &config)
 {
     const auto &language = config.tencent.target_language;
@@ -96,6 +105,22 @@ void RememberPositive(const std::string &identity, std::string gloss)
     if (g_cache.size() >= kMaxCacheEntries)
         g_cache.clear();
     g_cache[identity] = std::move(gloss);
+    g_failures.erase(identity);
+}
+
+bool IsBackingOff(const std::string &identity)
+{
+    const auto found = g_failures.find(identity);
+    return found != g_failures.end() && std::chrono::steady_clock::now() < found->second.retry_at;
+}
+
+void RememberFailure(const std::string &identity)
+{
+    std::lock_guard lock(g_mutex);
+    if (g_failures.size() >= kMaxCacheEntries && g_failures.find(identity) == g_failures.end())
+        g_failures.clear();
+    auto &entry = g_failures[identity];
+    entry.retry_at = std::chrono::steady_clock::now() + CloudTranslation::FailureRetryDelay(++entry.failures);
 }
 
 TencentTmt::Credentials ResolveCredentials(const TencentTmtConfig &config)
@@ -176,13 +201,14 @@ void ApplyTranslatedGroup(const std::vector<EnglishIme::TranslationQuery> &group
 {
     for (size_t i = 0; i < group.size(); ++i)
     {
+        // 结果数组比请求短，说明提供方的批次预算先用完了，后面的词根本没有发出，不算失败。
+        if (i >= translated.size())
+            break;
         const std::string identity = Identity(group[i], target_language, provider_scope);
-        const std::string raw = i < translated.size() ? translated[i] : std::string{};
-        const std::string gloss = CloudTranslation::FormatGloss(raw);
-        // 空结果也可能是超时、限流或批次预算耗尽后尚未发送的请求，不能当作没有译文缓存。
-        // 保留成功结果；失败项在下一次候选请求时重试，仍沿用现有的空闲延时和批次预算。
+        const std::string gloss = CloudTranslation::FormatGloss(translated[i]);
         if (gloss.empty())
         {
+            RememberFailure(identity);
             continue;
         }
         RememberPositive(identity, gloss);
@@ -278,6 +304,8 @@ void WorkerLoop()
                     results.push_back({query.key, query.direction, cached->second});
                     continue;
                 }
+                if (IsBackingOff(identity))
+                    continue;
                 if (query.direction == EnglishIme::TranslationDirection::EnglishToChinese &&
                     CloudTranslation::IsCloudTranslatableEnglish(query.key))
                     en_zh.push_back(query);
